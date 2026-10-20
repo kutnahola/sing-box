@@ -1,5 +1,5 @@
 # sing-box
-怎么用
+sing-box一键四协议版本(原汁原味、精简版)
 
 	
 	bash <(wget -qO- https://raw.githubusercontent.com/kutnahola/sing-box/main/sb.sh)
