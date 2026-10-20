@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # =========================================================
 #  sb.sh — sing-box 一键多协议脚本
-#  协议: VLESS-Reality-Vision / Hysteria2 / TUIC v5 /
-#        Shadowsocks-2022 / Trojan / AnyTLS / VMess-WS
+#  协议: VLESS-Reality-Vision / Hysteria2 / TUIC v5 / AnyTLS
 #  订阅: 通用 base64 / Clash(Mihomo) / sing-box, 带二维码
 #  适配: sing-box 1.12+ 新配置格式 (不使用已移除的旧字段)
 #  系统: Debian/Ubuntu/CentOS/Rocky/Alma/Fedora/Alpine
@@ -19,12 +18,13 @@ SUB_ENV=$WORK_DIR/sub.env
 SUB_CONF=$WORK_DIR/sub-nginx.conf
 SUB_WWW=/var/www/sb-sub          # 订阅文件目录 (由独立 nginx 实例提供)
 CLIENT=$SUB_WWW/sing-box.json
-TLS_SNI=www.bing.com             # 自签证书域名 (Hy2/TUIC/Trojan/AnyTLS)
+TLS_SNI=www.bing.com             # 自签证书域名 (Hy2/TUIC/AnyTLS)
 RULE_CDN=https://testingcf.jsdelivr.net/gh   # 规则文件镜像, 国内可直连
 
-PROTO_IDS="1 2 3 4 5 6 7"
-PROTO_NAME=([1]="VLESS-Reality-Vision" [2]="Hysteria2" [3]="TUIC v5" [4]="Shadowsocks-2022" [5]="Trojan" [6]="AnyTLS" [7]="VMess-WS")
-PROTO_FN=([1]=proto_reality [2]=proto_hy2 [3]=proto_tuic [4]=proto_ss [5]=proto_trojan [6]=proto_anytls [7]=proto_vmess)
+STATE_VER=2                      # 状态文件格式版本 (2 = 四协议编号)
+PROTO_IDS="1 2 3 4"
+PROTO_NAME=([1]="VLESS-Reality-Vision" [2]="Hysteria2" [3]="TUIC v5" [4]="AnyTLS")
+PROTO_FN=([1]=proto_reality [2]=proto_hy2 [3]=proto_tuic [4]=proto_anytls)
 
 red()    { echo -e "\033[31m$*\033[0m"; }
 green()  { echo -e "\033[32m$*\033[0m"; }
@@ -243,12 +243,10 @@ svc_active() {
 gen_secrets() {
   UUID=$($BIN generate uuid)
   PASS=$($BIN generate rand 16 --hex)
-  SS_KEY=$($BIN generate rand 16 --base64)        # 2022-blake3-aes-128-gcm 需 16 字节
   local kp; kp=$($BIN generate reality-keypair)
   REALITY_PRIV=$(awk '/PrivateKey/{print $2}' <<<"$kp")
   REALITY_PUB=$(awk '/PublicKey/{print $2}' <<<"$kp")
   REALITY_SID=$($BIN generate rand 8 --hex)
-  WS_PATH="/${UUID:0:8}-vm"
   SUB_TOKEN=$($BIN generate rand 16 --hex)
 }
 
@@ -307,29 +305,6 @@ proto_tuic() {
   PORTS_UDP+=("$1")
 }
 
-proto_ss() {
-  local n="$NAME-SS" m=2022-blake3-aes-128-gcm
-  IN+=("{\"type\":\"shadowsocks\",\"tag\":\"ss-in\",\"listen\":\"$LISTEN\",\"listen_port\":$1,
-    \"method\":\"$m\",\"password\":\"$SS_KEY\",\"multiplex\":{\"enabled\":true}}")
-  OUT+=("{\"type\":\"shadowsocks\",\"tag\":\"$n\",\"server\":\"$SERVER_IP\",\"server_port\":$1,
-    \"method\":\"$m\",\"password\":\"$SS_KEY\"}")
-  CLASH+=("{\"name\":\"$n\",\"type\":\"ss\",\"server\":\"$SERVER_IP\",\"port\":$1,\"cipher\":\"$m\",\"password\":\"$SS_KEY\",\"udp\":true}")
-  LINK+=("ss://$(echo -n "$m:$SS_KEY" | base64 -w0)@$LINK_IP:$1#$(uri "$n")")
-  PORTS_TCP+=("$1"); PORTS_UDP+=("$1")
-}
-
-proto_trojan() {
-  local n="$NAME-Trojan"
-  IN+=("{\"type\":\"trojan\",\"tag\":\"trojan-in\",\"listen\":\"$LISTEN\",\"listen_port\":$1,
-    \"users\":[{\"password\":\"$PASS\"}],$(TLS_SRV '"h2","http/1.1"')}")
-  OUT+=("{\"type\":\"trojan\",\"tag\":\"$n\",\"server\":\"$SERVER_IP\",\"server_port\":$1,
-    \"password\":\"$PASS\",$(TLS_CLI '"h2","http/1.1"')}")
-  CLASH+=("{\"name\":\"$n\",\"type\":\"trojan\",\"server\":\"$SERVER_IP\",\"port\":$1,\"password\":\"$PASS\",
-    \"sni\":\"$TLS_SNI\",\"skip-cert-verify\":true,\"udp\":true}")
-  LINK+=("trojan://$PASS@$LINK_IP:$1?security=tls&sni=$TLS_SNI&allowInsecure=1&type=tcp#$(uri "$n")")
-  PORTS_TCP+=("$1")
-}
-
 proto_anytls() {
   local n="$NAME-AnyTLS"
   IN+=("{\"type\":\"anytls\",\"tag\":\"anytls-in\",\"listen\":\"$LISTEN\",\"listen_port\":$1,
@@ -340,22 +315,6 @@ proto_anytls() {
   CLASH+=("{\"name\":\"$n\",\"type\":\"anytls\",\"server\":\"$SERVER_IP\",\"port\":$1,\"password\":\"$PASS\",
     \"sni\":\"$TLS_SNI\",\"skip-cert-verify\":true,\"client-fingerprint\":\"chrome\",\"udp\":true}")
   LINK+=("anytls://$PASS@$LINK_IP:$1?sni=$TLS_SNI&insecure=1#$(uri "$n")")
-  PORTS_TCP+=("$1")
-}
-
-proto_vmess() {
-  local n="$NAME-VMess-WS"
-  IN+=("{\"type\":\"vmess\",\"tag\":\"vmess-in\",\"listen\":\"$LISTEN\",\"listen_port\":$1,
-    \"users\":[{\"uuid\":\"$UUID\",\"alterId\":0}],
-    \"transport\":{\"type\":\"ws\",\"path\":\"$WS_PATH\"}}")
-  OUT+=("{\"type\":\"vmess\",\"tag\":\"$n\",\"server\":\"$SERVER_IP\",\"server_port\":$1,
-    \"uuid\":\"$UUID\",\"security\":\"auto\",\"transport\":{\"type\":\"ws\",\"path\":\"$WS_PATH\"}}")
-  CLASH+=("{\"name\":\"$n\",\"type\":\"vmess\",\"server\":\"$SERVER_IP\",\"port\":$1,\"uuid\":\"$UUID\",\"alterId\":0,
-    \"cipher\":\"auto\",\"udp\":true,\"network\":\"ws\",\"ws-opts\":{\"path\":\"$WS_PATH\"}}")
-  local j
-  j=$(jq -nc --arg ps "$n" --arg add "$SERVER_IP" --arg port "$1" --arg id "$UUID" --arg path "$WS_PATH" \
-    '{v:"2",ps:$ps,add:$add,port:$port,id:$id,aid:"0",scy:"auto",net:"ws",type:"none",host:"",path:$path,tls:""}')
-  LINK+=("vmess://$(echo -n "$j" | base64 -w0)")
   PORTS_TCP+=("$1")
 }
 
@@ -381,7 +340,7 @@ assign_ports() {
   SUB_PORT=""
   for id in $PROTO_IDS; do printf -v "PORT_$id" '%s' ""; done
   for id in $PROTOS; do
-    [[ $id =~ ^[1-7]$ && $seen != *" $id "* ]] || continue
+    [[ $id =~ ^[1-4]$ && $seen != *" $id "* ]] || continue
     seen+="$id "
     p=$(alloc_port "$p"); printf -v "PORT_$id" '%s' "$p"; p=$((p + 1))
   done
@@ -397,8 +356,8 @@ max_port() {
 
 save_state() {
   local v
-  for v in UUID PASS SS_KEY REALITY_PRIV REALITY_PUB REALITY_SID WS_PATH SUB_TOKEN SUB_PORT \
-           NAME REALITY_SNI SERVER_IP LINK_IP LISTEN PORT_1 PORT_2 PORT_3 PORT_4 PORT_5 PORT_6 PORT_7; do
+  for v in STATE_VER UUID PASS REALITY_PRIV REALITY_PUB REALITY_SID SUB_TOKEN SUB_PORT \
+           NAME REALITY_SNI SERVER_IP LINK_IP LISTEN PORT_1 PORT_2 PORT_3 PORT_4; do
     printf '%s=%q\n' "$v" "${!v}"
   done > "$STATE"
   chmod 600 "$STATE"
@@ -406,10 +365,41 @@ save_state() {
 
 load_state() {
   [[ -f $STATE ]] || die "未找到节点状态文件, 请先用菜单 1 安装 (旧版脚本安装的需重新安装一次)"
+  local want=$STATE_VER
+  STATE_VER=1
   source "$STATE"
+  OLD_PORTS=()
+  if [[ $STATE_VER != "$want" ]]; then
+    # 旧版七协议编号: 4=SS 5=Trojan 6=AnyTLS 7=VMess -> 新版 4=AnyTLS, 其余三个弃用
+    local p
+    for p in "$PORT_4" "$PORT_5" "$PORT_7"; do [[ -n $p ]] && OLD_PORTS+=("$p"); done
+    PORT_4=$PORT_6
+    unset PORT_5 PORT_6 PORT_7 SS_KEY WS_PATH
+  fi
+  STATE_VER=$want
 }
 
-# 根据 PORT_1..PORT_7 生成服务端配置 (端口为空表示未启用)
+# 旧版 (七协议) 升级: 去掉 SS/Trojan/VMess, 保留其余节点的密钥、端口和订阅地址
+migrate_state() {
+  [[ -f $STATE ]] || return 0
+  grep -q "^STATE_VER=$STATE_VER\$" "$STATE" && return 0
+  check_sys; load_state
+  ((${#OLD_PORTS[@]})) || { save_state; return 0; }
+  yellow "检测到旧版配置, 正在移除 Shadowsocks / Trojan / VMess ..."
+  if [[ -z $PORT_1$PORT_2$PORT_3$PORT_4 ]]; then
+    red "旧配置只包含已移除的协议, 请用菜单 1 重新安装"; return 0
+  fi
+  [[ -f $SUB_ENV ]] && source "$SUB_ENV"
+  ENABLE_SUB=${SUB_ENABLED:-0}
+  build_server
+  $BIN check -c "$CONF" || die "迁移后配置检查未通过"
+  build_subs; save_state
+  svc sing-box restart >/dev/null 2>&1
+  close_firewall "${OLD_PORTS[@]}"
+  green "已完成迁移, 订阅地址不变, 客户端「更新订阅」即可。"
+}
+
+# 根据 PORT_1..PORT_4 生成服务端配置 (端口为空表示未启用)
 build_server() {
   IN=(); OUT=(); CLASH=(); LINK=(); PORTS_TCP=(); PORTS_UDP=()
   local id pv
@@ -597,11 +587,10 @@ do_install() {
 
   echo
   echo "可选协议:"
-  echo "  1. VLESS + Reality + Vision   2. Hysteria2      3. TUIC v5"
-  echo "  4. Shadowsocks-2022           5. Trojan         6. AnyTLS"
-  echo "  7. VMess + WebSocket"
+  echo "  1. VLESS + Reality + Vision   2. Hysteria2"
+  echo "  3. TUIC v5                    4. AnyTLS"
   read -rp "选择协议 (空格分隔, 回车=全部): " PROTOS
-  [[ -z $PROTOS ]] && PROTOS="1 2 3 4 5 6 7"
+  [[ -z $PROTOS ]] && PROTOS="1 2 3 4"
   PROTOS=${PROTOS//,/ }
 
   read -rp "起始端口 (回车=随机): " START_PORT
@@ -680,7 +669,7 @@ show_nodes() {
     fi
   fi
   echo
-  yellow "提示: Hy2/TUIC/Trojan/AnyTLS 使用自签证书 (已开启跳过验证); 云服务商安全组需自行放行端口 (Hy2/TUIC 为 UDP)。"
+  yellow "提示: Hy2/TUIC/AnyTLS 使用自签证书 (已开启跳过验证); 云服务商安全组需自行放行端口 (Hy2/TUIC 为 UDP)。"
   [[ $SUB_ENABLED == 1 ]] && yellow "订阅地址含全部节点密钥且为明文 HTTP, 请勿公开分享; 不用时可在菜单中关闭订阅服务。"
 }
 
@@ -709,7 +698,7 @@ manage_protos() {
 
   local add=() del=() id pv seen=" " left=0
   for id in ${sel//,/ }; do
-    [[ $id =~ ^[1-7]$ && $seen != *" $id "* ]] || continue
+    [[ $id =~ ^[1-4]$ && $seen != *" $id "* ]] || continue
     seen+="$id "; pv=PORT_$id
     if [[ -n ${!pv} ]]; then del+=("$id"); else add+=("$id"); fi
   done
@@ -762,7 +751,6 @@ manage_protos() {
   if ((${#add[@]})); then
     echo; green "新增节点链接:"
     for id in "${add[@]}"; do pv=PORT_$id; grep -E ":${!pv}([?#]|$)" "$LINKS"; done
-    grep -q '^vmess://' "$LINKS" && [[ " ${add[*]} " == *" 7 "* ]] && grep '^vmess://' "$LINKS"
   fi
 }
 
@@ -849,6 +837,7 @@ menu() {
 
 main() {
   check_root
+  migrate_state
   case $1 in
     install)   do_install ;;
     info)      show_nodes ;;
