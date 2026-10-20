@@ -1,5 +1,6 @@
 # sing-box
 怎么用
+bash <(wget -qO- https://raw.githubusercontent.com/kutnahola/sing-box/main/sb.sh)
 
 	•	进入后会列出 7 个协议的启用状态和端口。
 	•	输入编号即可：未启用的会被增加，已启用的会被删除，可以一次输入多个，例如 2 5 7。
