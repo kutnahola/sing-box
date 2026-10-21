@@ -12,12 +12,8 @@ sing-box一键四协议版本(原汁原味、精简版)
     apt install systemd-timesyncd -y
  
     timedatectl set-timezone Asia/Shanghai
-
-
-
 	
 	bash <(wget -qO- https://raw.githubusercontent.com/kutnahola/sing-box/main/sb.sh)
-	
 	
 	•	进入后会列出4个协议的启用状态和端口。
 	•	输入编号即可：未启用的会被增加，已启用的会被删除，可以一次输入多个，例如 2 3 4。
