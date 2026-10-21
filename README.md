@@ -1,9 +1,21 @@
 # sing-box
 sing-box一键四协议版本(原汁原味、精简版)
 
+	 运行‘全能初始化命令’复制代码按回车
+
+	apt update -y && apt upgrade -y
+
+	apt install -y curl wget sudo socat cron unzip
+
+	设置时区  
+apt install systemd-timesyncd -y
+ 
+timedatectl set-timezone Asia/Shanghai
+
+
+
 	
 	bash <(wget -qO- https://raw.githubusercontent.com/kutnahola/sing-box/main/sb.sh)
-	
 	
 	
 	•	进入后会列出4个协议的启用状态和端口。
