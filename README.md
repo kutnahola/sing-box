@@ -7,10 +7,11 @@ sing-box一键四协议版本(原汁原味、精简版)
 
 	apt install -y curl wget sudo socat cron unzip
 
-	设置时区  
-apt install systemd-timesyncd -y
+	设置时区
+	
+    apt install systemd-timesyncd -y
  
-timedatectl set-timezone Asia/Shanghai
+    timedatectl set-timezone Asia/Shanghai
 
 
 
