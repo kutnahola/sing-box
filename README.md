@@ -15,7 +15,7 @@ sing-box一键四协议版本(精简版)
  
     timedatectl set-timezone Asia/Shanghai
 	
-部署节点一键搭建Sing-box一键多协议脚本
+部署一键Sing-box多协议脚本
 	
 	bash <(wget -qO- https://raw.githubusercontent.com/kutnahola/sing-box/main/sb.sh)
 	
