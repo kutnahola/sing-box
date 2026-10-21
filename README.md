@@ -5,6 +5,8 @@ sing-box一键四协议版本(原汁原味、精简版)
 
 	apt update -y && apt upgrade -y
 
+安装基础工具
+	
 	apt install -y curl wget sudo socat cron unzip
 
 设置时区
@@ -14,6 +16,7 @@ sing-box一键四协议版本(原汁原味、精简版)
     timedatectl set-timezone Asia/Shanghai
 	
 部署节点一键搭建协议Sing-box 全家桶 —— 一键多协议脚本
+	
 	bash <(wget -qO- https://raw.githubusercontent.com/kutnahola/sing-box/main/sb.sh)
 	
 	•	进入后会列出4个协议的启用状态和端口。
