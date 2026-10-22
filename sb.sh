@@ -524,15 +524,17 @@ build_subs() {
   build_clash
   build_singbox_client
   local base="http://$LINK_IP:$SUB_PORT/$SUB_TOKEN"
+  SUB_AUTO="$base/sub"          # 按 User-Agent 自动返回对应格式
   SUB_BASE64="$base/base64"
   SUB_CLASH="$base/clash"
   SUB_SINGBOX="$base/sing-box"
   SUB_QR="$base/qr.png"
-  command -v qrencode >/dev/null && qrencode -s 8 -m 2 -o "$SUB_WWW/qr.png" "$SUB_BASE64"
+  command -v qrencode >/dev/null && qrencode -s 8 -m 2 -o "$SUB_WWW/qr.png" "$SUB_AUTO"
   chmod 644 "$SUB_WWW"/*
   {
     printf 'SUB_ENABLED=%q\n' "$ENABLE_SUB"
     printf 'SUB_PORT=%q\nSUB_NAME=%q\n' "$SUB_PORT" "$NAME"
+    printf 'SUB_AUTO=%q\n' "$SUB_AUTO"
     printf 'SUB_BASE64=%q\nSUB_CLASH=%q\nSUB_SINGBOX=%q\nSUB_QR=%q\n' "$SUB_BASE64" "$SUB_CLASH" "$SUB_SINGBOX" "$SUB_QR"
   } > "$SUB_ENV"
 }
@@ -550,11 +552,18 @@ http {
   server_tokens off;
   types {}
   charset utf-8;
+  # 通用订阅 /sub: 按客户端 User-Agent 返回对应格式, 识别不了的返回 base64
+  map \$http_user_agent \$sb_target {
+    default base64;
+    "~*(sing-box|singbox|SFI/|SFA/|SFM/|SFT/)" sing-box;
+    "~*(clash|mihomo|stash|nyanpasu)" clash;
+  }
   server {
     listen $SUB_PORT;
     $v6
     server_name _;
     root $SUB_WWW;
+    location = /$SUB_TOKEN/sub      { rewrite ^ /$SUB_TOKEN/\$sb_target last; }
     location = /$SUB_TOKEN/base64   { default_type text/plain;  try_files /base64.txt =404; }
     location = /$SUB_TOKEN/clash    {
       default_type text/yaml;
@@ -882,17 +891,17 @@ show_nodes() {
 
   if [[ $SUB_ENABLED == 1 ]]; then
     echo; green "================ 在线订阅 ================"
-    echo "通用订阅 (v2rayN / NekoBox / Shadowrocket / Karing):"
-    echo "  $SUB_BASE64"
-    echo "Clash / Mihomo (Clash Verge Rev / ClashMi / FlClash):"
-    echo "  $SUB_CLASH"
-    echo "sing-box (SFA / SFI / SFM / 桌面版):"
-    echo "  $SUB_SINGBOX"
+    echo "通用订阅 (自动识别客户端, 推荐; 小火箭 / v2rayN / Clash / sing-box 等都可用):"
+    echo "  ${SUB_AUTO:-$SUB_BASE64}"
+    echo; echo "指定格式 (自动识别不准时使用):"
+    echo "  base64:   $SUB_BASE64"
+    echo "  Clash:    $SUB_CLASH"
+    echo "  sing-box: $SUB_SINGBOX"
     echo; green "一键导入:"
     echo "  clash://install-config?url=$(uri "$SUB_CLASH")&name=$(uri "$SUB_NAME")"
     echo "  sing-box://import-remote-profile?url=$(uri "$SUB_SINGBOX")#$(uri "$SUB_NAME")"
     command -v qrencode >/dev/null && echo "  订阅二维码图片: $SUB_QR"
-    print_qr "通用订阅二维码 (手机客户端扫码导入):" "$SUB_BASE64"
+    print_qr "通用订阅二维码 (各类手机客户端扫码导入):" "${SUB_AUTO:-$SUB_BASE64}"
   else
     echo; yellow "未开启在线订阅, 订阅文件在 $SUB_WWW/ (base64.txt / clash.yaml / sing-box.json)"
   fi
@@ -942,6 +951,24 @@ apply_changes() {
   apply_hop
   open_firewall
   rm -f "$STATE.bak"
+}
+
+# 旧版订阅服务升级: 加入按客户端自动识别的通用订阅 /sub (令牌和端口不变)
+upgrade_sub() {
+  [[ -f $SUB_CONF && -f $STATE ]] || return 0
+  grep -q 'sb_target' "$SUB_CONF" && return 0
+  check_sys; load_state
+  [[ -f $SUB_ENV ]] && source "$SUB_ENV"
+  ENABLE_SUB=${SUB_ENABLED:-0}
+  build_server; build_subs
+  cp "$SUB_CONF" "$SUB_CONF.bak"
+  build_sub_nginx
+  if ! nginx -t -q -c "$SUB_CONF" 2>/dev/null; then
+    mv "$SUB_CONF.bak" "$SUB_CONF"; yellow "订阅服务升级失败, 已保留旧配置"; return 0
+  fi
+  rm -f "$SUB_CONF.bak"
+  svc_active sb-sub && svc sb-sub restart >/dev/null 2>&1
+  green "订阅服务已升级: 新增自动识别客户端的通用订阅地址 (菜单 2 查看)"
 }
 
 # Hysteria2 优化: 端口跳跃 / Brutal 带宽
@@ -1110,6 +1137,7 @@ menu() {
 main() {
   check_root
   migrate_state
+  upgrade_sub
   case $1 in
     install)   do_install ;;
     info)      show_nodes ;;
