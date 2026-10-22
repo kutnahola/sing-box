@@ -26,7 +26,7 @@ TLS_SNI=www.bing.com             # 自签证书域名 (Hy2/TUIC/AnyTLS)
 RULE_CDN=https://testingcf.jsdelivr.net/gh   # 规则文件镜像, 国内可直连
 
 STATE_VER=2                      # 状态文件格式版本 (2 = 四协议编号)
-SUB_GEN=2                        # 订阅内容版本, 模板有变化时加 1, 旧机器运行脚本会自动重新生成
+CUR_SUB_GEN=6                    # 订阅内容版本, 模板有变化时加 1, 旧机器运行脚本会自动重新生成
 PROTO_IDS="1 2 3 4"
 PROTO_NAME=([1]="VLESS-Reality-Vision" [2]="Hysteria2" [3]="TUIC v5" [4]="AnyTLS")
 PROTO_FN=([1]=proto_reality [2]=proto_hy2 [3]=proto_tuic [4]=proto_anytls)
@@ -436,21 +436,23 @@ build_server() {
 }
 
 # ---------------- 客户端分流 ----------------
-# 两种订阅使用同一套分流组; 规则数据: sing-box 用 SagerNet 规则集, Clash 用 MetaCubeX geosite/geoip
-G_SEL="🚀 节点选择"; G_AUTO="♻️ 自动选择"; G_AI="🤖 AI"; G_YT="▶️ YouTube"; G_NF="🎥 Netflix"
-G_TG="📲 Telegram"; G_GG="🔍 Google"; G_MS="Ⓜ️ 微软"; G_AP="🍎 苹果"; G_CN="🎯 全球直连"
+# 两种订阅使用同一套精简分流组; 规则数据: sing-box 用 SagerNet 规则集, Clash 用 MetaCubeX geosite/geoip
+#   🚀 节点选择 / ♻️ 自动选择: 代理出口 (不含直连)
+#   🤖 AI:       AI 服务, 只能走代理, 防止暴露真实 IP
+#   🌍 国外服务: YouTube / Netflix / Telegram / Google / GitHub, 只能走代理
+#   🎯 全球直连: 国内网站/IP + 苹果 + 微软
+#   🛑 广告拦截: 仅 Clash (sing-box 固定拦截)
+#   🐟 漏网之鱼: 其余流量, 含直连供应急
+G_SEL="🚀 节点选择"; G_AUTO="♻️ 自动选择"; G_AI="🤖 AI"; G_INTL="🌍 国外服务"; G_CN="🎯 全球直连"
 G_AD="🛑 广告拦截"; G_FINAL="🐟 漏网之鱼"
 
 # sing-box 客户端完整配置: TUN + mixed(127.0.0.1:2080), 分流组, 规则集直连下载 (1.14+ 写法)
 build_singbox_client() {
   local nodes; nodes=$(printf '%s\n' "${OUT[@]}" | jq -s -c .) || die "sing-box 客户端节点生成失败"
   jq -n --argjson nodes "$nodes" --arg cdn "$RULE_CDN" \
-     --arg sel "$G_SEL" --arg auto "$G_AUTO" --arg ai "$G_AI" --arg yt "$G_YT" --arg nf "$G_NF" \
-     --arg tg "$G_TG" --arg gg "$G_GG" --arg ms "$G_MS" --arg ap "$G_AP" --arg cn "$G_CN" --arg fin "$G_FINAL" '
+     --arg sel "$G_SEL" --arg auto "$G_AUTO" --arg ai "$G_AI" --arg intl "$G_INTL" --arg cn "$G_CN" --arg fin "$G_FINAL" '
   ($nodes | map(.tag)) as $tags |
   def sel($t; $list; $def): {type: "selector", tag: $t, outbounds: $list, default: $def};
-  def proxy_first($t): sel($t; [$sel, $auto] + $tags + ["direct"]; $sel);
-  def direct_first($t): sel($t; ["direct", $sel, $auto] + $tags; "direct");
   def rs($n): {type: "remote", tag: $n, format: "binary",
     url: ($cdn + (if ($n | startswith("geoip-")) then "/SagerNet/sing-geoip@rule-set/" else "/SagerNet/sing-geosite@rule-set/" end) + $n + ".srs")};
   {
@@ -474,10 +476,10 @@ build_singbox_client() {
       {type: "mixed", tag: "mixed-in", listen: "127.0.0.1", listen_port: 2080}
     ],
     outbounds: ([
-      sel($sel; [$auto] + $tags + ["direct"]; $auto),
+      sel($sel; [$auto] + $tags; $auto),   # 不含直连: AI 等分组经由它出站, 必须保证走代理
       {type: "urltest", tag: $auto, outbounds: $tags, url: "https://www.gstatic.com/generate_204", interval: "5m", tolerance: 50},
-      proxy_first($ai), proxy_first($yt), proxy_first($nf), proxy_first($tg), proxy_first($gg),
-      direct_first($ms), direct_first($ap),
+      sel($ai; [$sel, $auto] + $tags; $sel),
+      sel($intl; [$sel, $auto] + $tags; $sel),
       sel($cn; ["direct", $sel]; "direct"),
       sel($fin; [$sel, $auto, "direct"] + $tags; $sel)
     ] + $nodes + [{type: "direct", tag: "direct"}]),
@@ -490,20 +492,13 @@ build_singbox_client() {
         {ip_is_private: true, outbound: "direct"},
         {rule_set: "geosite-category-ads-all", action: "reject"},
         {rule_set: "geosite-category-ai-!cn", outbound: $ai},
-        {rule_set: "geosite-youtube",  outbound: $yt},
-        {rule_set: "geosite-netflix",  outbound: $nf},
-        {rule_set: "geosite-telegram", outbound: $tg},
-        {rule_set: "geosite-google",   outbound: $gg},
-        {rule_set: "geosite-github",   outbound: $sel},
-        {rule_set: "geosite-microsoft", outbound: $ms},
-        {rule_set: "geosite-apple",    outbound: $ap},
-        {rule_set: "geosite-cn",       outbound: $cn},
-        {rule_set: "geoip-cn",         outbound: $cn}
+        {rule_set: ["geosite-youtube", "geosite-netflix", "geosite-telegram", "geosite-google", "geosite-github"], outbound: $intl},
+        {rule_set: ["geosite-microsoft", "geosite-apple", "geosite-cn", "geoip-cn"], outbound: $cn}
       ],
       rule_set: ([
-        "geosite-category-ads-all", "geosite-category-ai-!cn", "geosite-youtube", "geosite-netflix",
-        "geosite-telegram", "geosite-google", "geosite-github", "geosite-microsoft", "geosite-apple",
-        "geosite-cn", "geoip-cn"
+        "geosite-category-ads-all", "geosite-category-ai-!cn",
+        "geosite-youtube", "geosite-netflix", "geosite-telegram", "geosite-google", "geosite-github",
+        "geosite-microsoft", "geosite-apple", "geosite-cn", "geoip-cn"
       ] | map(rs(.))),
       final: $fin,
       auto_detect_interface: true,
@@ -522,16 +517,13 @@ build_clash() {
   local names groups
   names=$(printf '%s\n' "${CLASH[@]}" | jq -s -c 'map(.name)') || die "Clash 节点生成失败"
   groups=$(jq -c -n --argjson n "$names" \
-     --arg sel "$G_SEL" --arg auto "$G_AUTO" --arg ai "$G_AI" --arg yt "$G_YT" --arg nf "$G_NF" \
-     --arg tg "$G_TG" --arg gg "$G_GG" --arg ms "$G_MS" --arg ap "$G_AP" --arg cn "$G_CN" \
+     --arg sel "$G_SEL" --arg auto "$G_AUTO" --arg ai "$G_AI" --arg intl "$G_INTL" --arg cn "$G_CN" \
      --arg ad "$G_AD" --arg fin "$G_FINAL" '
     def g($name; $list): {name: $name, type: "select", proxies: $list};
-    def proxy_first($name): g($name; [$sel, $auto] + $n + ["DIRECT"]);
-    def direct_first($name): g($name; ["DIRECT", $sel, $auto] + $n);
-    g($sel; [$auto] + $n + ["DIRECT"]),
+    g($sel; [$auto] + $n),   # 不含直连: AI 等分组经由它出站, 必须保证走代理
     {name: $auto, type: "url-test", url: "https://www.gstatic.com/generate_204", interval: 300, tolerance: 50, proxies: $n},
-    proxy_first($ai), proxy_first($yt), proxy_first($nf), proxy_first($tg), proxy_first($gg),
-    direct_first($ms), direct_first($ap),
+    g($ai; [$sel, $auto] + $n),
+    g($intl; [$sel, $auto] + $n),
     g($cn; ["DIRECT", $sel]),
     g($ad; ["REJECT", "DIRECT"]),
     g($fin; [$sel, $auto, "DIRECT"] + $n)')
@@ -565,13 +557,13 @@ rules:
   - "GEOIP,private,DIRECT,no-resolve"
   - "GEOSITE,category-ads-all,$G_AD"
   - "GEOSITE,category-ai-!cn,$G_AI"
-  - "GEOSITE,youtube,$G_YT"
-  - "GEOSITE,netflix,$G_NF"
-  - "GEOSITE,telegram,$G_TG"
-  - "GEOSITE,google,$G_GG"
-  - "GEOSITE,github,$G_SEL"
-  - "GEOSITE,microsoft,$G_MS"
-  - "GEOSITE,apple,$G_AP"
+  - "GEOSITE,youtube,$G_INTL"
+  - "GEOSITE,netflix,$G_INTL"
+  - "GEOSITE,telegram,$G_INTL"
+  - "GEOSITE,google,$G_INTL"
+  - "GEOSITE,github,$G_INTL"
+  - "GEOSITE,microsoft,$G_CN"
+  - "GEOSITE,apple,$G_CN"
   - "GEOSITE,cn,$G_CN"
   - "GEOIP,CN,$G_CN"
   - "MATCH,$G_FINAL"
@@ -593,7 +585,7 @@ build_subs() {
   command -v qrencode >/dev/null && qrencode -s 8 -m 2 -o "$SUB_WWW/qr.png" "$SUB_AUTO"
   chmod 644 "$SUB_WWW"/*
   {
-    printf 'SUB_GEN=%q\n' "$SUB_GEN"
+    printf 'SUB_GEN=%q\n' "$CUR_SUB_GEN"
     printf 'SUB_ENABLED=%q\n' "$ENABLE_SUB"
     printf 'SUB_PORT=%q\nSUB_NAME=%q\n' "$SUB_PORT" "$NAME"
     printf 'SUB_AUTO=%q\n' "$SUB_AUTO"
@@ -1021,7 +1013,7 @@ upgrade_sub() {
   [[ -f $STATE && -s $LINKS ]] || return 0
   local need_ngx=0 need_sub=0
   [[ -f $SUB_CONF ]] && ! grep -q 'sb_target' "$SUB_CONF" && need_ngx=1
-  grep -qx "SUB_GEN=$SUB_GEN" "$SUB_ENV" 2>/dev/null || need_sub=1
+  grep -qx "SUB_GEN=$CUR_SUB_GEN" "$SUB_ENV" 2>/dev/null || need_sub=1
   ((need_ngx || need_sub)) || return 0
   check_sys; load_state
   [[ -f $SUB_ENV ]] && source "$SUB_ENV"
