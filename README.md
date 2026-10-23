@@ -1,5 +1,5 @@
 # Sing-box
-Sing-box一键四协议版本(vless/reality、Hy2、Tuic、Anytls精简版)
+Sing-box "One-Click" 4-Protocol Version (VLESS/Reality, Hysteria 2, Tuic, and AnyTLS - Lite Edition)
 
 Run the ‘all-in-one initialization command’ by pasting the code and pressing Enter.
 
