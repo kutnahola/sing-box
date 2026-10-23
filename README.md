@@ -14,7 +14,11 @@ Sing-box一键四协议版本(vless/reality、Hy2、Tuic、Anytls精简版)
     apt install systemd-timesyncd -y
  
     timedatectl set-timezone Asia/Shanghai
-	
+
+运行 BBR 加速脚本
+
+    sudo bash -c 'echo "net.core.default_qdisc=fq" >> /etc/sysctl.conf && echo "net.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.conf && sysctl -p'
+
 部署一键Sing-box多协议脚本
 	
 	bash <(wget -qO- https://raw.githubusercontent.com/kutnahola/sing-box/main/sb.sh)
